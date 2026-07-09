@@ -106,9 +106,24 @@ async function runTool(name: string, args: any, userId?: string): Promise<string
   }
 }
 
-const SYSTEM_PROMPT = `You are AquaBot, a helpful AI assistant inside AquaChat — a real-time messaging app.
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  af: "Afrikaans",
+  zu: "isiZulu (Zulu)",
+  xh: "isiXhosa (Xhosa)",
+  nr: "isiNdebele (Ndebele)",
+  ss: "siSwati (Swati)",
+  nso: "Sepedi (Northern Sotho)",
+  st: "Sesotho (Southern Sotho)",
+  tn: "Setswana (Tswana)",
+  ts: "Xitsonga (Tsonga)",
+  ve: "Tshivenda (Venda)",
+};
 
-IMPORTANT RULES:
+function buildSystemPrompt(languageCode: string = "en") {
+  const languageName = LANGUAGE_NAMES[languageCode] || "English";
+
+  return `Always reply in ${languageName}, regardless of what language the user writes in, unless they explicitly ask you to switch to a different language. This includes greetings, casual chat, and tool-based answers.
 - ALWAYS directly answer the user's actual question
 - NEVER repeat the same response twice
 - For football/sports questions, answer them directly from your knowledge
@@ -118,7 +133,7 @@ IMPORTANT RULES:
 - For your name: say "I'm AquaBot, your AI assistant in AquaChat"
 - Keep replies short (2-4 sentences) and conversational
 
-NEVER say "Hello! Is there something I can help you with" — just answer the question directly.`;
+NEVER say "Hello! Is there something I can help you with" — just answer the question directly.`;}
 
 async function createCompletion(messages: any[]) {
   let lastErr: any;
@@ -129,10 +144,8 @@ async function createCompletion(messages: any[]) {
         messages,
         tools,
         tool_choice: "auto",
-        temperature: 0.9,      // ← increase from 0.7 to 0.9
+        temperature: 0.7,
         max_tokens: 500,
-        frequency_penalty: 0.8, // ← add this — stops repeating phrases
-        presence_penalty: 0.6,  // ← add this — encourages new topics
       });
     } catch (err) {
       console.error(`Groq call failed on model ${model}:`, err);
@@ -144,7 +157,8 @@ async function createCompletion(messages: any[]) {
 
 export async function generateBotReply(
   conversationHistory: { role: "user" | "assistant"; content: string }[],
-  userId?: string
+  userId?: string,
+  language: string = "en"
 ) {
   if (!process.env.GROQ_API_KEY) {
     console.error("❌ GROQ_API_KEY is not set");
@@ -152,7 +166,7 @@ export async function generateBotReply(
   }
 
   const messages: any[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt(language) },
     ...conversationHistory,
   ];
 

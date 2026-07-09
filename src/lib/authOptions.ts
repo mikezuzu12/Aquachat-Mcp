@@ -32,17 +32,33 @@ export const authOptions = {
           name: user.full_name,
           email: user.email,
           image: user.avatar_url,
+          language: user.language || "en", // Add language
+          avatar_emoji: user.avatar_emoji,
+          bg_color: user.bg_color,
+          about: user.about,
         };
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user }: any) {
-      if (user) token.id = user.id;
+      if (user) {
+        token.id = user.id;
+        token.language = user.language || "en";
+        token.avatar_emoji = user.avatar_emoji;
+        token.bg_color = user.bg_color;
+        token.about = user.about;
+      }
       return token;
     },
     async session({ session, token }: any) {
-      if (token) session.user.id = token.id;
+      if (token) {
+        session.user.id = token.id;
+        session.user.language = token.language || "en";
+        session.user.avatar_emoji = token.avatar_emoji;
+        session.user.bg_color = token.bg_color;
+        session.user.about = token.about;
+      }
       return session;
     },
   },

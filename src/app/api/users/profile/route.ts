@@ -10,7 +10,7 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, full_name, email, phone, avatar_url, avatar_emoji, about, bg_color")
+    .select("id, full_name, email, phone, avatar_url, avatar_emoji, about, bg_color, language")
     .eq("id", user.id)
     .single();
 
@@ -22,7 +22,7 @@ export async function PUT(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const user = session.user as any;
-  const { full_name, email, phone, avatar_url } = await req.json();
+  const { full_name, email, phone, avatar_url, language } = await req.json();
 
   if (!full_name?.trim()) {
     return NextResponse.json({ error: "Name is required." }, { status: 400 });
@@ -46,6 +46,7 @@ export async function PUT(req: NextRequest) {
   if (email) updateData.email = email;
   if (phone !== undefined) updateData.phone = phone || null;
   if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
+  if (language !== undefined) updateData.language = language;
 
   const { error } = await supabaseAdmin.from("users").update(updateData).eq("id", user.id);
 

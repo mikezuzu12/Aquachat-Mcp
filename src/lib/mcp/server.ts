@@ -3,6 +3,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -160,6 +162,33 @@ const SYSTEM_INFO = {
   ],
 };
 
+// Resource definitions — data the server exposes for context (not callable actions)
+const resources = [
+  {
+    uri: "aquachat://system-info",
+    name: "System Info",
+    description: "Architecture, features, and tech stack for AquaChat",
+    mimeType: "application/json",
+  },
+];
+
+async function handleReadResource(uri: string) {
+  switch (uri) {
+    case "aquachat://system-info":
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(SYSTEM_INFO, null, 2),
+          },
+        ],
+      };
+    default:
+      throw new Error(`Unknown resource: ${uri}`);
+  }
+}
+
 // Tool handler with system understanding
 async function handleToolCall(toolName: string, args: any) {
   switch (toolName) {
@@ -203,7 +232,6 @@ async function handleToolCall(toolName: string, args: any) {
     case "get_my_contacts": {
       const { userId } = args;
 
-      // Get all conversations the user is in
       const { data: memberships } = await supabaseAdmin
         .from("conversation_members")
         .select("conversation_id")
@@ -217,7 +245,6 @@ async function handleToolCall(toolName: string, args: any) {
 
       const convIds = memberships.map((m) => m.conversation_id);
 
-      // Get all members of those conversations except the user
       const { data: contacts } = await supabaseAdmin
         .from("conversation_members")
         .select(`
@@ -236,7 +263,6 @@ async function handleToolCall(toolName: string, args: any) {
         .in("conversation_id", convIds)
         .neq("user_id", userId);
 
-      // Deduplicate contacts
       const contactMap = new Map();
       contacts?.forEach((c: any) => {
         if (c.user && !contactMap.has(c.user.id)) {
@@ -311,7 +337,6 @@ async function handleToolCall(toolName: string, args: any) {
       if (conversationId) {
         query = query.eq("conversation_id", conversationId);
       } else if (userId && contactId) {
-        // Find conversation between two users
         const { data: convData } = await supabaseAdmin
           .from("conversation_members")
           .select("conversation_id")
@@ -405,7 +430,6 @@ async function handleToolCall(toolName: string, args: any) {
         };
       }
 
-      // Format conversations with contact info
       const formatted = data?.map((conv: any) => {
         const members = conv.members?.map((m: any) => m.user) || [];
         const otherMembers = members.filter((m: any) => m.id !== userId);
@@ -458,7 +482,6 @@ async function handleToolCall(toolName: string, args: any) {
       const { userId, getContacts } = args;
 
       if (userId) {
-        // Get status from specific user
         const { data, error } = await supabaseAdmin
           .from("statuses")
           .select("*")
@@ -477,7 +500,6 @@ async function handleToolCall(toolName: string, args: any) {
       }
 
       if (getContacts) {
-        // Get all statuses from contacts (simplified)
         const { data, error } = await supabaseAdmin
           .from("statuses")
           .select(`
@@ -545,7 +567,6 @@ async function handleToolCall(toolName: string, args: any) {
     case "get_recent_activity": {
       const { userId, limit = 20 } = args;
 
-      // Get recent messages from all conversations the user is in
       const { data: memberships } = await supabaseAdmin
         .from("conversation_members")
         .select("conversation_id")
@@ -603,6 +624,7 @@ export async function startMcpServer() {
     {
       capabilities: {
         tools: {},
+        resources: {},
       },
     }
   );
@@ -616,11 +638,19 @@ export async function startMcpServer() {
     return await handleToolCall(name, args);
   });
 
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources,
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    return await handleReadResource(request.params.uri);
+  });
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
   console.error("✅ AquaChat MCP Server started successfully");
-  console.error(`📦 ${tools.length} tools available`);
+  console.error(`📦 ${tools.length} tools, ${resources.length} resource(s) available`);
 }
 
 // Auto-start if run directly

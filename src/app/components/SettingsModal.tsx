@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
+import { SUPPORTED_LANGUAGES } from "@/lib/i18n/translations";
 
 const BACKGROUND_COLORS = [
   { name: "Dark Navy",   value: "#0A0E1A" },
@@ -30,6 +32,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const { data: session, update } = useSession();
   const user = session?.user as any;
   const fileRef = useRef<HTMLInputElement>(null);
+  
+  // Language
+  const { language, setLanguage, t } = useLanguage();
 
   const [section, setSection] = useState<Section>("menu");
   const [saving, setSaving] = useState(false);
@@ -62,6 +67,19 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwError, setPwError] = useState("");
 
+  // Load current privacy settings from DB
+  useEffect(() => {
+    if (!user?.id) return;
+    fetch(`/api/users/privacy`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.last_seen_privacy) setLastSeen(data.last_seen_privacy);
+        if (data.online_status_privacy) setOnlineStatus(data.online_status_privacy);
+        if (typeof data.read_receipts === "boolean") setReadReceipts(data.read_receipts);
+      })
+      .catch(() => {});
+  }, [user?.id]);
+
   async function saveProfile() {
     setSaving(true);
     try {
@@ -74,6 +92,25 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           avatar_emoji: avatarEmoji,
           avatar_url: avatarUrl,
           bg_color: bgColor,
+        }),
+      });
+      await update();
+      flashSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function savePrivacy() {
+    setSaving(true);
+    try {
+      await fetch("/api/users/privacy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          last_seen_privacy: lastSeen,
+          online_status_privacy: onlineStatus,
+          read_receipts: readReceipts,
         }),
       });
       await update();
@@ -105,13 +142,16 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   async function changePassword() {
     setPwError("");
     if (!currentPassword || !newPassword || !confirmPassword) {
-      setPwError("Please fill in all fields."); return;
+      setPwError("Please fill in all fields."); 
+      return;
     }
     if (newPassword !== confirmPassword) {
-      setPwError("New passwords don't match."); return;
+      setPwError("New passwords don't match."); 
+      return;
     }
     if (newPassword.length < 6) {
-      setPwError("Password must be at least 6 characters."); return;
+      setPwError("Password must be at least 6 characters."); 
+      return;
     }
     setSaving(true);
     try {
@@ -121,8 +161,13 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       const data = await res.json();
-      if (!res.ok) { setPwError(data.error || "Failed to change password."); return; }
-      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+      if (!res.ok) { 
+        setPwError(data.error || "Failed to change password."); 
+        return; 
+      }
+      setCurrentPassword(""); 
+      setNewPassword(""); 
+      setConfirmPassword("");
       flashSaved();
     } finally {
       setSaving(false);
@@ -150,12 +195,12 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   const MENU_ITEMS = [
-    { id: "profile",       icon: "👤", label: "Profile",       sub: "Change your name, photo, about" },
-    { id: "chats",         icon: "💬", label: "Chats",         sub: "Wallpaper, font size, themes" },
-    { id: "notifications", icon: "🔔", label: "Notifications", sub: "Message and group tones" },
-    { id: "privacy",       icon: "🔒", label: "Privacy",       sub: "Last seen, read receipts" },
-    { id: "account",       icon: "🔑", label: "Account",       sub: "Security, change password" },
-    { id: "help",          icon: "❓", label: "Help",          sub: "FAQ, contact us, privacy policy" },
+    { id: "profile",       icon: "👤", label: t("profile"),       sub: t("change.name") },
+    { id: "chats",         icon: "💬", label: t("chats"),         sub: t("change.chats") },
+    { id: "notifications", icon: "🔔", label: t("notifications"), sub: t("change.notifications") },
+    { id: "privacy",       icon: "🔒", label: t("privacy"),       sub: t("change.privacy") },
+    { id: "account",       icon: "🔑", label: t("account"),       sub: t("change.account") },
+    { id: "help",          icon: "❓", label: t("help"),          sub: t("change.help") },
   ] as const;
 
   const Toggle = ({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) => (
@@ -186,14 +231,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   );
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div key="settings-overlay"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    <>
+      <motion.div
+        key="settings-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/60 z-50 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      <motion.div key="settings-modal"
+      <motion.div
+        key="settings-modal"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -212,7 +261,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </button>
           )}
           <h3 className="font-bold text-white flex-1">
-            {section === "menu" ? "Settings" : MENU_ITEMS.find(m => m.id === section)?.label || "Settings"}
+            {section === "menu" ? t("settings") : MENU_ITEMS.find(m => m.id === section)?.label || t("settings")}
           </h3>
           {saved && <span className="text-xs text-green-400 font-medium">✓ Saved</span>}
           <button onClick={onClose} className="text-slate-400 hover:text-white transition p-1">✕</button>
@@ -221,7 +270,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           <AnimatePresence mode="wait">
-
             {/* ── MAIN MENU ── */}
             {section === "menu" && (
               <motion.div key="menu"
@@ -256,6 +304,21 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   </button>
                 </div>
 
+                {/* Language selector */}
+                <div className="px-5 py-3 border-b border-white/8">
+                  <label className="text-xs text-slate-400 uppercase tracking-widest block mb-2">{t("language")}</label>
+                  <select
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value as any)}
+                    className="w-full px-4 py-2 rounded-xl text-sm text-white outline-none focus:border-green-500/50 transition"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    {SUPPORTED_LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label}</option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Menu items */}
                 <div className="py-2">
                   {MENU_ITEMS.map((item) => (
@@ -284,7 +347,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                     </svg>
-                    Log out
+                    {t("log.out")}
                   </button>
                 </div>
               </motion.div>
@@ -314,12 +377,12 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     </button>
                   </div>
                   <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-                  {uploading && <p className="text-xs text-slate-400">Uploading...</p>}
+                  {uploading && <p className="text-xs text-slate-400">{t("uploading")}</p>}
                 </div>
 
                 {/* Emoji picker */}
                 <div>
-                  <p className="text-xs text-slate-400 mb-2 uppercase tracking-widest">Or choose an emoji</p>
+                  <p className="text-xs text-slate-400 mb-2 uppercase tracking-widest">{t("or.choose.emoji")}</p>
                   <div className="grid grid-cols-6 gap-2">
                     {AVATAR_EMOJIS.map((emoji) => (
                       <button key={emoji} onClick={() => { setAvatarEmoji(emoji); setAvatarUrl(""); }}
@@ -337,7 +400,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
                 {/* Name */}
                 <div>
-                  <label className="text-xs text-slate-400 uppercase tracking-widest block mb-2">Your Name</label>
+                  <label className="text-xs text-slate-400 uppercase tracking-widest block mb-2">{t("your.name")}</label>
                   <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={30}
                     className="w-full px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white text-sm outline-none focus:border-green-500/50 transition" />
                   <p className="text-xs text-slate-500 text-right mt-1">{name.length}/30</p>
@@ -345,7 +408,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
                 {/* About */}
                 <div>
-                  <label className="text-xs text-slate-400 uppercase tracking-widest block mb-2">About</label>
+                  <label className="text-xs text-slate-400 uppercase tracking-widest block mb-2">{t("about")}</label>
                   <textarea value={about} onChange={(e) => setAbout(e.target.value)} maxLength={100} rows={3}
                     className="w-full px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white text-sm outline-none focus:border-green-500/50 transition resize-none" />
                   <p className="text-xs text-slate-500 text-right mt-1">{about.length}/100</p>
@@ -354,7 +417,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 <button onClick={saveProfile} disabled={saving}
                   className="w-full py-3 rounded-xl font-semibold text-white transition disabled:opacity-50"
                   style={{ background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
-                  {saving ? "Saving..." : "Save Profile"}
+                  {saving ? t("saving") : t("save.profile")}
                 </button>
               </motion.div>
             )}
@@ -367,7 +430,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
                 {/* Wallpaper */}
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Chat Wallpaper</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("chat.wallpaper")}</p>
                   <div className="grid grid-cols-4 gap-3">
                     {BACKGROUND_COLORS.map((color) => (
                       <button key={color.value} onClick={() => setBgColor(color.value)}
@@ -390,7 +453,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
                 {/* Preview */}
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Preview</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("preview")}</p>
                   <div className="rounded-2xl p-4 border border-white/10 transition-all" style={{ background: bgColor }}>
                     <div className="flex justify-end mb-2">
                       <div className="px-3 py-2 rounded-2xl rounded-tr-sm text-white text-xs"
@@ -409,7 +472,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
                 {/* Font size */}
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Font Size</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("font.size")}</p>
                   <div className="flex gap-2">
                     {["small", "medium", "large"].map((size) => (
                       <button key={size} onClick={() => setFontSize(size)}
@@ -428,7 +491,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 <button onClick={saveChats} disabled={saving}
                   className="w-full py-3 rounded-xl font-semibold text-white transition disabled:opacity-50"
                   style={{ background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
-                  {saving ? "Saving..." : "Save Changes"}
+                  {saving ? t("saving") : t("save.changes")}
                 </button>
               </motion.div>
             )}
@@ -438,11 +501,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <motion.div key="notifications"
                 initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
                 className="p-5 space-y-2">
-                <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Messages</p>
+                <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("messages")}</p>
                 {[
-                  { label: "Message notifications", sub: "Show notifications for new messages", value: msgNotifs, onChange: setMsgNotifs },
-                  { label: "Sound", sub: "Play sound for new messages", value: soundEnabled, onChange: setSoundEnabled },
-                  { label: "Vibration", sub: "Vibrate for new messages", value: vibration, onChange: setVibration },
+                  { label: t("message.notifications"), sub: t("show.notifications"), value: msgNotifs, onChange: setMsgNotifs },
+                  { label: t("sound"), sub: t("play.sound"), value: soundEnabled, onChange: setSoundEnabled },
+                  { label: t("vibration"), sub: t("vibrate"), value: vibration, onChange: setVibration },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center justify-between px-4 py-4 rounded-xl border border-white/8"
                     style={{ background: "rgba(255,255,255,0.03)" }}>
@@ -463,38 +526,38 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 className="p-5 space-y-5">
 
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Last Seen</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("last.seen")}</p>
                   <RadioGroup value={lastSeen} onChange={setLastSeen} options={[
-                    { value: "everyone", label: "Everyone" },
-                    { value: "contacts", label: "My Contacts" },
-                    { value: "nobody",   label: "Nobody" },
+                    { value: "everyone", label: t("everyone") },
+                    { value: "contacts", label: t("my.contacts") },
+                    { value: "nobody",   label: t("nobody") },
                   ]} />
                 </div>
 
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Online Status</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("online.status")}</p>
                   <RadioGroup value={onlineStatus} onChange={setOnlineStatus} options={[
-                    { value: "everyone", label: "Everyone" },
-                    { value: "nobody",   label: "Nobody" },
+                    { value: "everyone", label: t("everyone") },
+                    { value: "nobody",   label: t("nobody") },
                   ]} />
                 </div>
 
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Read Receipts</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("read.receipts")}</p>
                   <div className="flex items-center justify-between px-4 py-4 rounded-xl border border-white/8"
                     style={{ background: "rgba(255,255,255,0.03)" }}>
                     <div>
-                      <p className="text-sm font-medium text-white">Read receipts</p>
-                      <p className="text-xs text-slate-500">Show blue ticks when messages are read</p>
+                      <p className="text-sm font-medium text-white">{t("read.receipts")}</p>
+                      <p className="text-xs text-slate-500">{t("show.blue.ticks")}</p>
                     </div>
                     <Toggle value={readReceipts} onChange={setReadReceipts} />
                   </div>
                 </div>
 
-                <button onClick={flashSaved}
-                  className="w-full py-3 rounded-xl font-semibold text-white transition"
+                <button onClick={savePrivacy} disabled={saving}
+                  className="w-full py-3 rounded-xl font-semibold text-white transition disabled:opacity-50"
                   style={{ background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
-                  Save Privacy Settings
+                  {saving ? t("saving") : t("save.privacy")}
                 </button>
               </motion.div>
             )}
@@ -508,48 +571,48 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 {/* Account info */}
                 <div className="px-4 py-4 rounded-xl border border-white/8 space-y-3"
                   style={{ background: "rgba(255,255,255,0.03)" }}>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest">Account Info</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest">{t("account.info")}</p>
                   <div className="flex justify-between text-sm">
-                    <span className="text-slate-400">Email</span>
+                    <span className="text-slate-400">{t("email")}</span>
                     <span className="text-white">{user?.email}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-slate-400">Name</span>
+                    <span className="text-slate-400">{t("name")}</span>
                     <span className="text-white">{user?.name}</span>
                   </div>
                 </div>
 
                 {/* Change password */}
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Change Password</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("change.password")}</p>
                   {pwError && (
                     <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-3 rounded-xl mb-3">
                       {pwError}
                     </div>
                   )}
                   <div className="space-y-2">
-                    <input type="password" placeholder="Current password" value={currentPassword}
+                    <input type="password" placeholder={t("current.password")} value={currentPassword}
                       onChange={(e) => setCurrentPassword(e.target.value)}
                       className="w-full px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white text-sm outline-none focus:border-green-500/50 transition placeholder-slate-500" />
-                    <input type="password" placeholder="New password" value={newPassword}
+                    <input type="password" placeholder={t("new.password")} value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="w-full px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white text-sm outline-none focus:border-green-500/50 transition placeholder-slate-500" />
-                    <input type="password" placeholder="Confirm new password" value={confirmPassword}
+                    <input type="password" placeholder={t("confirm.password")} value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       className="w-full px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white text-sm outline-none focus:border-green-500/50 transition placeholder-slate-500" />
                   </div>
                   <button onClick={changePassword} disabled={saving}
                     className="w-full py-3 rounded-xl font-semibold text-white transition disabled:opacity-50 mt-3"
                     style={{ background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
-                    {saving ? "Saving..." : "Change Password"}
+                    {saving ? t("saving") : t("change.password")}
                   </button>
                 </div>
 
                 {/* Danger zone */}
                 <div className="pt-2">
-                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Danger Zone</p>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">{t("danger.zone")}</p>
                   <button className="w-full py-3 rounded-xl font-semibold text-red-400 border border-red-500/20 hover:bg-red-500/10 transition">
-                    Delete Account
+                    {t("delete.account")}
                   </button>
                 </div>
               </motion.div>
@@ -561,11 +624,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
                 className="p-5 space-y-2">
                 {[
-                  { icon: "📖", label: "FAQ",            sub: "Frequently asked questions" },
-                  { icon: "📧", label: "Contact Us",     sub: "Get help from our team" },
-                  { icon: "🔒", label: "Privacy Policy", sub: "How we handle your data" },
-                  { icon: "📜", label: "Terms of Service",sub: "Our terms and conditions" },
-                  { icon: "ℹ️",  label: "About AquaChat", sub: "Version 1.0.0" },
+                  { icon: "📖", label: t("faq"),            sub: t("faq") },
+                  { icon: "📧", label: t("contact.us"),     sub: t("contact.us") },
+                  { icon: "🔒", label: t("privacy.policy"), sub: t("privacy.policy") },
+                  { icon: "📜", label: t("terms.service"),  sub: t("terms.service") },
+                  { icon: "ℹ️",  label: t("about.aquachat"), sub: t("about.aquachat") },
                 ].map((item) => (
                   <button key={item.label}
                     className="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl border border-white/8 hover:bg-white/5 transition text-left"
@@ -579,10 +642,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 ))}
               </motion.div>
             )}
-
           </AnimatePresence>
         </div>
       </motion.div>
-    </AnimatePresence>
+    </>
   );
 }

@@ -1,5 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  ListToolsResultSchema,
+  CallToolResultSchema,
+  ListResourcesResultSchema,
+  ReadResourceResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 export class McpClient {
   private client: Client;
@@ -10,7 +16,7 @@ export class McpClient {
       command: "node",
       args: ["dist/lib/mcp/server.js"],
     });
-    
+
     this.client = new Client(
       {
         name: "aquachat-mcp-client",
@@ -29,7 +35,7 @@ export class McpClient {
   async listTools() {
     const result = await this.client.request(
       { method: "tools/list" },
-      undefined as any
+      ListToolsResultSchema
     );
     return result;
   }
@@ -43,7 +49,26 @@ export class McpClient {
           arguments: args,
         },
       },
-      undefined as any
+      CallToolResultSchema
+    );
+    return result;
+  }
+
+  async listResources() {
+    const result = await this.client.request(
+      { method: "resources/list" },
+      ListResourcesResultSchema
+    );
+    return result;
+  }
+
+  async readResource(uri: string) {
+    const result = await this.client.request(
+      {
+        method: "resources/read",
+        params: { uri },
+      },
+      ReadResourceResultSchema
     );
     return result;
   }
