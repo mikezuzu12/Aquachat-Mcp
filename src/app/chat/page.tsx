@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -13,6 +12,8 @@ import CreateStatusModal from "@/app/components/CreateStatusModal";
 import StatusViewer from "@/app/components/StatusViewer";
 import EmojiPicker from "emoji-picker-react";
 import GifPicker from "@/app/components/GifPicker";
+import CallScreen from "../components/calls/CallScreen";
+import IncomingCallModal from "../components/calls/IncomingCallModal";
 
 type User = {
   id: string;
@@ -262,6 +263,19 @@ export default function ChatPage() {
   const [toasts, setToasts] = useState<{ id: string; name: string; avatar: Partial<User>; text: string; convId: string }[]>([]);
   const [notifPermission, setNotifPermission] = useState<string>("default");
 
+  // ── Calls state ─────────────────────────────────────────────────────────
+  const [activeCall, setActiveCall] = useState<{
+    callId: string;
+    isVideo: boolean;
+    isCaller: boolean;
+    remoteUser: { id: string; full_name: string; avatar_url?: string; avatar_emoji?: string };
+  } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{
+    callId: string;
+    caller: { id: string; full_name: string; avatar_url?: string; avatar_emoji?: string };
+    isVideo: boolean;
+  } | null>(null);
+
   const conversationsRef = useRef<Conversation[]>([]);
   const activeConvRef = useRef<Conversation | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -415,6 +429,43 @@ export default function ChatPage() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [status]);
+
+  // ── Realtime: incoming calls (global, any conversation) ────────────────────
+  useEffect(() => {
+    if (status !== "authenticated" || !user?.id) return;
+
+    const channel = supabase
+      .channel(`incoming-calls-${user.id}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "calls",
+        filter: `receiver_id=eq.${user.id}`,
+      }, async (payload) => {
+        const call = payload.new as any;
+        if (call.status !== "ringing") return;
+
+        // Don't show incoming-call UI if already in a call — auto-mark as missed
+        if (activeCall) {
+          await fetch("/api/calls", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ call_id: call.id, status: "missed" }),
+          });
+          return;
+        }
+
+        const { data: caller } = await supabase
+          .from("users").select("id, full_name, avatar_url, avatar_emoji").eq("id", call.caller_id).single();
+
+        setIncomingCall({
+          callId: call.id,
+          caller: caller || { id: call.caller_id, full_name: "Unknown" },
+          isVideo: call.type === "video",
+        });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [status, user?.id, activeCall]);
 
   function openConvFromNotif(convId: string) {
     const conv = conversationsRef.current.find((c) => c.id === convId);
@@ -639,6 +690,70 @@ async function sendGif(gifUrl: string) {
       return;
     }
     setViewerMsg(msg);
+  }
+
+  // ── Calls: start / accept / reject ─────────────────────────────────────────
+  async function startCall(type: "voice" | "video") {
+  if (!activeConv || activeConv.is_group) return;
+  const otherUser = getConvAvatar(activeConv);
+  if (!otherUser?.id || !user?.id) return;
+
+  try {
+    const res = await fetch("/api/calls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: activeConv.id,
+        caller_id: user.id,
+        receiver_id: otherUser.id,
+        type,
+      }),
+    });
+    const data = await res.json();
+    console.log("Start call response:", data); // Debug log
+    
+    if (data.error || !data.call) {
+      console.error("Failed to start call:", data.error);
+      return;
+    }
+    
+    console.log("Call created with ID:", data.call.id); // Debug log
+    
+    setActiveCall({
+      callId: data.call.id,
+      isVideo: type === "video",
+      isCaller: true,
+      remoteUser: otherUser,
+    });
+  } catch (error) {
+    console.error("Error starting call:", error);
+  }
+}
+
+  async function acceptIncomingCall() {
+    if (!incomingCall) return;
+    await fetch("/api/calls", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ call_id: incomingCall.callId, status: "active" }),
+    });
+    setActiveCall({
+      callId: incomingCall.callId,
+      isVideo: incomingCall.isVideo,
+      isCaller: false,
+      remoteUser: incomingCall.caller,
+    });
+    setIncomingCall(null);
+  }
+
+  async function rejectIncomingCall() {
+    if (!incomingCall) return;
+    await fetch("/api/calls", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ call_id: incomingCall.callId, status: "rejected" }),
+    });
+    setIncomingCall(null);
   }
 
   const getConvName = (conv: Conversation) => {
@@ -994,6 +1109,27 @@ async function sendGif(gifUrl: string) {
                 </p>
               </div>
               <div className="flex items-center gap-1">
+                {/* Voice / video call buttons — 1:1 chats only, and not for the AI bot */}
+                {!activeConv.is_group && !(activeConv as any).is_bot_conversation && (
+                  <>
+                    <button onClick={() => startCall("voice")}
+                      className="p-2 rounded-xl hover:bg-white/10 transition text-slate-400 hover:text-white"
+                      title="Voice call">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                      </svg>
+                    </button>
+                    <button onClick={() => startCall("video")}
+                      className="p-2 rounded-xl hover:bg-white/10 transition text-slate-400 hover:text-white"
+                      title="Video call">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  </>
+                )}
                 {activeConv.is_group && (
                   <button onClick={() => setShowAddMembers(true)}
                     className="p-2 rounded-xl hover:bg-white/10 transition text-slate-400 hover:text-white">
@@ -1348,6 +1484,31 @@ async function sendGif(gifUrl: string) {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* ── CALLS ── */}
+      <AnimatePresence>
+        {incomingCall && !activeCall && (
+          <IncomingCallModal
+            caller={incomingCall.caller}
+            isVideo={incomingCall.isVideo}
+            onAccept={acceptIncomingCall}
+            onReject={rejectIncomingCall}
+          />
+        )}
+      </AnimatePresence>
+
+      {activeCall && (
+        <CallScreen
+          call={{
+            callId: activeCall.callId,
+            isVideo: activeCall.isVideo,
+            isCaller: activeCall.isCaller,
+            remoteUser: activeCall.remoteUser,
+          }}
+          userId={user?.id}
+          onEnd={() => setActiveCall(null)}
+        />
+      )}
 
     </div>
   );
