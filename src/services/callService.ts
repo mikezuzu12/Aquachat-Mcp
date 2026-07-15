@@ -141,6 +141,26 @@ export function subscribeToCallSignals(
     return () => {};
   }
 
+  // ✅ Catch any signals that were already inserted before we started listening
+  // (e.g. the offer, sent while we were still showing the incoming-call modal)
+  (async () => {
+    const { data: existingSignals, error } = await supabase
+      .from("call_signals")
+      .select("*")
+      .eq("call_id", callId)
+      .neq("from_user_id", currentUserId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching existing call signals:", error);
+      return;
+    }
+
+    for (const signal of existingSignals || []) {
+      onSignal(signal);
+    }
+  })();
+
   const channel = supabase
     .channel(`call-signals-${callId}`)
     .on(
