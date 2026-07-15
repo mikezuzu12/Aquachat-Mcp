@@ -5,14 +5,14 @@ import { authOptions } from "@/lib/authOptions";
 
 export async function POST(
   req: Request,
-  context: { params: { id: string } }  // ← Changed to context with plain params
+  context: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id } = context.params;  // ← No await needed
+  const { id } = await context.params;  // ← now needs await
   const { member_ids } = await req.json();
 
   if (!Array.isArray(member_ids) || member_ids.length === 0) {
