@@ -1,3 +1,4 @@
+// app/api/upload/route.ts (or wherever this file lives)
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getServerSession } from "next-auth";
@@ -11,30 +12,21 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File;
+    const type = (formData.get("type") as string) || "messages"; // "messages" | "voice-notes"
     if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
-
-    console.log("📁 File received:", file.name, file.type, file.size);
 
     if (file.size > 50 * 1024 * 1024) {
       return NextResponse.json({ error: "File must be under 50MB" }, { status: 400 });
     }
 
     const ext = file.name.split(".").pop();
-    const path = `messages/${user.id}-${Date.now()}.${ext}`;
+    const folder = type === "voice-notes" ? "voice-notes" : "messages";
+    const path = `${folder}/${user.id}-${Date.now()}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
-
-    console.log("⬆️ Uploading to path:", path);
-
-    // Check if bucket exists first
-    const { data: buckets, error: bucketError } = await supabaseAdmin
-      .storage.listBuckets();
-    console.log("🪣 Buckets:", buckets?.map(b => b.name), "Error:", bucketError);
 
     const { data, error } = await supabaseAdmin.storage
       .from("chat-media")
       .upload(path, buffer, { contentType: file.type, upsert: true });
-
-    console.log("📤 Upload result:", data, "Error:", error);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

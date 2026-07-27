@@ -14,6 +14,7 @@ import EmojiPicker from "emoji-picker-react";
 import GifPicker from "@/app/components/GifPicker";
 import CallScreen from "../components/calls/CallScreen";
 import IncomingCallModal from "../components/calls/IncomingCallModal";
+import { useVoiceRecorder } from "../../hooks/useVoiceRecorder";
 
 type User = {
   id: string;
@@ -257,6 +258,13 @@ export default function ChatPage() {
   const [sendAsViewOnce, setSendAsViewOnce] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
 
+  // ── Voice notes state ────────────────────────────────────────────────────
+  const {
+    isRecording, audioBlob, audioUrl, duration,
+    error: voiceError, startRecording, stopRecording, cancelRecording, reset: resetVoice,
+  } = useVoiceRecorder();
+  const [uploadingVoice, setUploadingVoice] = useState(false);
+
   const [viewerMsg, setViewerMsg] = useState<Message | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
 
@@ -396,7 +404,7 @@ export default function ChatPage() {
           const { data: sender } = await supabase
             .from("users").select("full_name, avatar_url, avatar_emoji").eq("id", msg.sender_id).single();
 
-          const preview = msg.content || (msg.media_type === "image" ? "📷 Photo" : "📎 Attachment");
+          const preview = msg.content || (msg.media_type === "image" ? "📷 Photo" : msg.media_type === "voice" ? "🎤 Voice note" : "📎 Attachment");
           const toastId = `${msg.id}-${Date.now()}`;
 
           setToasts((prev) => [...prev, {
@@ -668,6 +676,35 @@ async function sendGif(gifUrl: string) {
       cancelPendingMedia();
     } finally {
       setUploadingMedia(false);
+    }
+  }
+
+  // ── Voice notes: send ────────────────────────────────────────────────────
+  async function confirmSendVoice() {
+    if (!audioBlob || !activeConv) return;
+    setUploadingVoice(true);
+    try {
+      const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
+      const formData = new FormData();
+      formData.append("file", audioBlob, `voice-${Date.now()}.${ext}`);
+      formData.append("type", "voice-notes");
+
+      const uploadRes = await fetch("/api/upload/media", { method: "POST", body: formData });
+      const uploadData = await uploadRes.json();
+      if (!uploadData.url) return;
+
+      await fetch(`/api/conversations/${activeConv.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: "",
+          media_url: uploadData.url,
+          media_type: "voice",
+        }),
+      });
+      resetVoice();
+    } finally {
+      setUploadingVoice(false);
     }
   }
 
@@ -1203,6 +1240,9 @@ async function sendGif(gifUrl: string) {
                                 className="max-w-xs rounded-xl mb-1 object-cover cursor-pointer hover:opacity-90 transition" />
                             )
                           )}
+                          {msg.media_url && msg.media_type === "voice" && (
+                            <audio src={msg.media_url} controls className="max-w-[220px]" />
+                          )}
                           {msg.content && <p className="leading-relaxed">{msg.content}</p>}
                         </div>
                         <div className={`flex items-center gap-1 mt-0.5 px-1 ${isMe ? "justify-end" : "justify-start"}`}>
@@ -1280,6 +1320,27 @@ async function sendGif(gifUrl: string) {
     </button>
     {showGifPicker && <GifPicker onSelect={sendGif} onClose={() => setShowGifPicker(false)} />}
   </div>
+
+  {/* Mic button — hold to record */}
+  <button
+    onMouseDown={startRecording}
+    onMouseUp={stopRecording}
+    onMouseLeave={() => isRecording && stopRecording()}
+    onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
+    onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+    className="p-2.5 rounded-full transition flex-shrink-0 flex items-center"
+    style={{
+      background: isRecording ? "rgba(239,68,68,0.2)" : "transparent",
+      color: isRecording ? "#ef4444" : "#94a3b8",
+    }}
+    title="Hold to record voice note"
+  >
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+    </svg>
+    {isRecording && <span className="ml-1 text-xs font-bold">{duration}s</span>}
+  </button>
 
   <input ref={inputRef} type="text" placeholder="Type a message" value={newMessage}
     onChange={(e) => setNewMessage(e.target.value)}
@@ -1422,6 +1483,39 @@ async function sendGif(gifUrl: string) {
                     className="flex-1 py-3 rounded-xl font-semibold text-white disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #25D366, #128C7E)" }}>
                     {uploadingMedia ? "Sending..." : "Send"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Voice note preview modal */}
+      <AnimatePresence>
+        {audioUrl && (
+          <>
+            <motion.div key="overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 z-50" onClick={() => !uploadingVoice && resetVoice()} />
+            <motion.div key="modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md rounded-3xl border border-white/10 overflow-hidden shadow-2xl"
+              style={{ background: "#111827" }}>
+              <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between">
+                <h3 className="font-bold text-white">Voice note</h3>
+                <button onClick={() => !uploadingVoice && resetVoice()} className="text-slate-400 hover:text-white">✕</button>
+              </div>
+              <div className="p-5">
+                {voiceError && <p className="text-red-400 text-sm mb-3">{voiceError}</p>}
+                <audio src={audioUrl} controls className="w-full mb-5" />
+                <div className="flex gap-3">
+                  <button onClick={resetVoice} disabled={uploadingVoice}
+                    className="flex-1 py-3 rounded-xl font-medium text-slate-400 border border-white/10 disabled:opacity-50"
+                    style={{ background: "rgba(255,255,255,0.03)" }}>Cancel</button>
+                  <button onClick={confirmSendVoice} disabled={uploadingVoice}
+                    className="flex-1 py-3 rounded-xl font-semibold text-white disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #25D366, #128C7E)" }}>
+                    {uploadingVoice ? "Sending..." : "Send"}
                   </button>
                 </div>
               </div>
